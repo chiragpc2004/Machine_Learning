@@ -1,0 +1,86 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from scipy import stats
+import re
+
+def preprocess_dataframe(df, 
+                         drop_cols=None, 
+                         fillna_method='mean', 
+                         encode_cols=None, 
+                         scale_cols=None, 
+                         remove_outliers=False,
+                         correlation_threshold=0.95,
+                         clean_text_cols=None):
+    
+    df = df.copy()
+
+    # 1. Drop specified columns
+    if drop_cols:
+        df.drop(columns=drop_cols, inplace=True, errors='ignore')
+
+    # 2. Handle missing values
+    for col in df.columns:
+        if df[col].isnull().sum() > 0:
+            if fillna_method == 'mean' and df[col].dtype in ['float64', 'int64']:
+                df[col].fillna(df[col].mean(), inplace=True)
+            elif fillna_method == 'median':
+                df[col].fillna(df[col].median(), inplace=True)
+            elif fillna_method == 'mode':
+                df[col].fillna(df[col].mode()[0], inplace=True)
+            else:
+                df[col].fillna(0, inplace=True)
+
+    # 3. Text cleaning
+    if clean_text_cols:
+        for col in clean_text_cols:
+            df[col] = df[col].astype(str).apply(lambda x: re.sub(r'\W+', ' ', x.lower().strip()))
+
+    # 4. Encode categorical columns
+    if encode_cols:
+        for col in encode_cols:
+            if df[col].nunique() < 10:
+                df = pd.get_dummies(df, columns=[col], drop_first=True)
+            else:
+                le = LabelEncoder()
+                df[col] = le.fit_transform(df[col].astype(str))
+
+    # 5. Scale numeric columns
+    if scale_cols:
+        scaler = StandardScaler()
+        df[scale_cols] = scaler.fit_transform(df[scale_cols])
+
+    # 6. Remove outliers using Z-score
+    if remove_outliers:
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        df = df[(np.abs(stats.zscore(df[numeric_cols])) < 3).all(axis=1)]
+
+    # 7. Drop highly correlated columns
+    if correlation_threshold < 1.0:
+        corr_matrix = df.corr().abs()
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = [column for column in upper.columns if any(upper[column] > correlation_threshold)]
+        df.drop(columns=to_drop, inplace=True)
+
+    # 8. Drop duplicates
+    df.drop_duplicates(inplace=True)
+
+    return df
+
+
+
+Example
+df = pd.read_csv("your_data.csv")
+
+clean_df = preprocess_dataframe(
+    df,
+    drop_cols=['ID', 'Timestamp'],
+    fillna_method='median',
+    encode_cols=['Gender', 'MaritalStatus'],
+    scale_cols=['Income', 'Age'],
+    remove_outliers=True,
+    correlation_threshold=0.9,
+    clean_text_cols=['Review', 'Comments']
+)
+
+clean_df.head()
